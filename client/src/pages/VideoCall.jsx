@@ -36,11 +36,23 @@ const VideoCall = () => {
   const socketRef = useRef(null);
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
-  
-  // HTML Video Elements refs
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
+
+  // Callback refs to bind media streams directly to video DOM nodes when they mount or change
+  const localVideoCallbackRef = (node) => {
+    if (node && node.srcObject !== localStreamRef.current) {
+      node.srcObject = localStreamRef.current;
+      console.log('Successfully bound local stream to video element via callback ref');
+    }
+  };
+
+  const remoteVideoCallbackRef = (node) => {
+    if (node && node.srcObject !== remoteStreamRef.current) {
+      node.srcObject = remoteStreamRef.current;
+      console.log('Successfully bound remote stream to video element via callback ref');
+    }
+  };
 
   // 1. Fetch Appointment Details & Verify Auth
   useEffect(() => {
@@ -63,20 +75,6 @@ const VideoCall = () => {
     };
     initCallData();
   }, [appointmentId]);
-
-  // Bind local stream to video ref
-  useEffect(() => {
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
-
-  // Bind remote stream to video ref when peer is connected
-  useEffect(() => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStream;
-    }
-  }, [remoteStream, peerConnected]);
 
   // 2. Setup WebRTC Media, PeerConnection, and WebSockets Signaling
   useEffect(() => {
@@ -128,6 +126,7 @@ const VideoCall = () => {
       pc.ontrack = (event) => {
         console.log('Received remote media stream track');
         const stream = event.streams[0] || new MediaStream([event.track]);
+        remoteStreamRef.current = stream;
         setRemoteStream(stream);
         setPeerConnected(true);
         setConnectionStatus('Connected');
@@ -305,6 +304,7 @@ const VideoCall = () => {
     setRemoteStream(null);
     setLocalStream(null);
     pendingCandidatesRef.current = [];
+    remoteStreamRef.current = null;
   };
 
   // Toggle Microphone
@@ -387,14 +387,14 @@ const VideoCall = () => {
           <div className={`video-grid ${peerConnected ? 'peer-connected' : ''}`}>
             {/* Local Feed */}
             <div className="video-container">
-              <video ref={localVideoRef} autoPlay playsInline muted />
+              <video ref={localVideoCallbackRef} autoPlay playsInline muted />
               <div className="video-label">Local stream (You)</div>
             </div>
 
             {/* Remote Feed */}
             {peerConnected && (
               <div className="video-container">
-                <video ref={remoteVideoRef} autoPlay playsInline />
+                <video ref={remoteVideoCallbackRef} autoPlay playsInline />
                 <div className="video-label">
                   {userRole === 'doctor' ? appointment?.patient.name : `Dr. ${appointment?.doctor.name}`}
                 </div>
