@@ -1,0 +1,17 @@
+{
+  "name": "healthcare-telemedicine-app",
+  "version": "1.0.0",
+  "description": "Full-Stack Healthcare Telemedicine MERN App",
+  "scripts": {
+    "install:server": "npm install --prefix server",
+    "install:client": "npm install --prefix client",
+    "install-all": "npm install && npm run install:server && npm run install:client",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "test": "node server/utils/test.js"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

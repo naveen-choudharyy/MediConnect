@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MediConnect medical logo">
+  <defs>
+    <linearGradient id="teal" x1="80" y1="80" x2="430" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#32D6D4"/>
+      <stop offset="1" stop-color="#149FAF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Medical cross -->
+  <path
+    d="M166 82
+       C142 82 122 102 122 126
+       V188 H78
+       C54 188 34 208 34 232
+       V280
+       C34 304 54 324 78 324
+       H122 V386
+       C122 410 142 430 166 430
+       H214
+       C238 430 258 410 258 386
+       V324 H320
+       C344 324 364 304 364 280
+       V232
+       C364 208 344 188 320 188
+       H258 V126
+       C258 102 238 82 214 82 Z"
+    fill="url(#teal)"/>
+
+  <!-- Connection line -->
+  <path
+    d="M260 270 L398 132"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="28"
+    stroke-linecap="round"/>
+
+  <!-- Connection nodes -->
+  <circle cx="250" cy="280" r="38" fill="#FFFFFF"/>
+  <circle cx="250" cy="280" r="16" fill="#159FAD"/>
+
+  <circle cx="410" cy="120" r="38" fill="#FFFFFF"/>
+  <circle cx="410" cy="120" r="16" fill="#159FAD"/>
+
+  <!-- Small pulse detail -->
+  <path
+    d="M72 256 H112 L128 225 L148 289 L166 256 H204"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="10"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.95"/>
+</svg>
