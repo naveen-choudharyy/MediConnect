@@ -82,7 +82,7 @@ const VideoCall = () => {
         // Initialize Socket.IO connection
         setConnectionStatus('Connecting to signaling server...');
         const token = getAuthToken();
-        const socketUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+        const socketUrl = import.meta.env.VITE_SOCKET_URL || `${window.location.protocol}//${window.location.hostname}:5000`;
         
         socketRef.current = io(socketUrl, {
           auth: { token }
