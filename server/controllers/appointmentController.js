@@ -1,6 +1,8 @@
 const Appointment = require('../models/Appointment');
 const DoctorProfile = require('../models/DoctorProfile');
 const User = require('../models/User');
+const Razorpay = require('razorpay');
+const crypto = require('crypto');
 
 // Helper to normalize Date to YYYY-MM-DD at midnight UTC
 const normalizeDate = (dateString) => {
@@ -91,19 +93,62 @@ exports.bookAppointment = async (req, res) => {
     }
 
     // 5. Create Appointment
-    const appointment = await Appointment.create({
+    const appointmentData = {
       patient: req.user._id,
       doctor,
       appointmentDate: dateObj,
       startTime,
       endTime,
       status: 'pending' // default status
-    });
+    };
+
+    let razorpayOrder = null;
+    const isRazorpayConfigured = process.env.RAZORPAY_KEY_ID && 
+                                process.env.RAZORPAY_KEY_SECRET && 
+                                process.env.RAZORPAY_KEY_ID !== 'rzp_test_placeholder';
+
+    if (isRazorpayConfigured && doctorProfile.consultationFee > 0) {
+      try {
+        const razorpay = new Razorpay({
+          key_id: process.env.RAZORPAY_KEY_ID,
+          key_secret: process.env.RAZORPAY_KEY_SECRET
+        });
+
+        const options = {
+          amount: doctorProfile.consultationFee * 100, // amount in paise
+          currency: 'INR',
+          receipt: `receipt_apt_${Date.now()}`
+        };
+
+        const order = await razorpay.orders.create(options);
+        razorpayOrder = {
+          id: order.id,
+          amount: order.amount,
+          currency: order.currency,
+          key: process.env.RAZORPAY_KEY_ID
+        };
+
+        appointmentData.paymentStatus = 'pending';
+        appointmentData.razorpayOrderId = order.id;
+      } catch (error) {
+        console.error('Razorpay Order Creation Failed:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to initiate payment gateway order: ' + error.message
+        });
+      }
+    } else {
+      // Mock payment or mark paid/free directly
+      appointmentData.paymentStatus = doctorProfile.consultationFee > 0 ? 'pending' : 'paid';
+    }
+
+    const appointment = await Appointment.create(appointmentData);
 
     return res.status(201).json({
       success: true,
-      message: 'Appointment booked successfully',
-      appointment
+      message: razorpayOrder ? 'Booking initiated. Please complete payment.' : 'Appointment booked successfully',
+      appointment,
+      razorpayOrder
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -266,6 +311,144 @@ exports.updateAppointmentStatus = async (req, res) => {
       success: true,
       message: `Appointment status updated to ${status}`,
       appointment
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Verify Razorpay payment signature
+// @route   POST /api/appointments/:id/verify-payment
+// @access  Private (Patient only)
+exports.verifyPayment = async (req, res) => {
+  const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+  const { id } = req.params;
+
+  if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+    return res.status(400).json({
+      success: false,
+      message: 'Payment verification details missing'
+    });
+  }
+
+  try {
+    const appointment = await Appointment.findById(id);
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    // Verify signature
+    const hmac = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || 'placeholder_secret');
+    hmac.update(razorpay_order_id + '|' + razorpay_payment_id);
+    const generated_signature = hmac.digest('hex');
+
+    if (generated_signature === razorpay_signature) {
+      appointment.paymentStatus = 'paid';
+      appointment.razorpayPaymentId = razorpay_payment_id;
+      appointment.razorpaySignature = razorpay_signature;
+      await appointment.save();
+
+      return res.json({
+        success: true,
+        message: 'Payment verified and appointment booking completed successfully',
+        appointment
+      });
+    } else {
+      appointment.paymentStatus = 'failed';
+      await appointment.save();
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed: Signature mismatch'
+      });
+    }
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get Razorpay payment configuration
+// @route   GET /api/appointments/payment-config
+// @access  Private
+exports.getPaymentConfig = (req, res) => {
+  res.json({
+    success: true,
+    key: process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder'
+  });
+};
+
+// @desc    Get/Create Razorpay order details for an existing pending appointment
+// @route   GET /api/appointments/:id/payment-payload
+// @access  Private (Patient only)
+exports.getPaymentPayload = async (req, res) => {
+  try {
+    const appointment = await Appointment.findById(req.params.id)
+      .populate('doctor', 'name')
+      .exec();
+
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    if (appointment.patient.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    if (appointment.paymentStatus !== 'pending') {
+      return res.status(400).json({ success: false, message: 'Appointment is already paid or not eligible for payment' });
+    }
+
+    const doctorProfile = await DoctorProfile.findOne({ user: appointment.doctor._id });
+    if (!doctorProfile) {
+      return res.status(404).json({ success: false, message: 'Doctor profile not found' });
+    }
+
+    const isRazorpayConfigured = process.env.RAZORPAY_KEY_ID && 
+                                process.env.RAZORPAY_KEY_SECRET && 
+                                process.env.RAZORPAY_KEY_ID !== 'rzp_test_placeholder';
+
+    if (!isRazorpayConfigured) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment gateway is not configured on the server. Cannot proceed with real payment.'
+      });
+    }
+
+    let razorpayOrder = null;
+    if (appointment.razorpayOrderId) {
+      razorpayOrder = {
+        id: appointment.razorpayOrderId,
+        amount: doctorProfile.consultationFee * 100,
+        currency: 'INR',
+        key: process.env.RAZORPAY_KEY_ID
+      };
+    } else {
+      const razorpay = new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET
+      });
+
+      const options = {
+        amount: doctorProfile.consultationFee * 100, // paise
+        currency: 'INR',
+        receipt: `receipt_apt_${appointment._id}`
+      };
+
+      const order = await razorpay.orders.create(options);
+      appointment.razorpayOrderId = order.id;
+      await appointment.save();
+
+      razorpayOrder = {
+        id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        key: process.env.RAZORPAY_KEY_ID
+      };
+    }
+
+    return res.json({
+      success: true,
+      razorpayOrder,
+      doctorName: appointment.doctor.name
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

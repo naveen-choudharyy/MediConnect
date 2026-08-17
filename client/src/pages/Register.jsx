@@ -208,7 +208,7 @@ const Register = ({ role }) => {
                 />
               </div>
               <div>
-                <label htmlFor="fee">Consultation Fee ($)</label>
+                <label htmlFor="fee">Consultation Fee (INR)</label>
                 <input
                   type="number"
                   id="fee"

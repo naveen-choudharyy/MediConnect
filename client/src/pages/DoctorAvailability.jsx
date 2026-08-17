@@ -120,7 +120,7 @@ const DoctorAvailability = () => {
       {/* Form to add slots */}
       <div className="card">
         <h3>Add Availability Interval</h3>
-        <form onSubmit={handleAddSlot} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr auto', gap: '1rem', alignItems: 'flex-end' }}>
+        <form onSubmit={handleAddSlot} className="availability-form">
           <div>
             <label htmlFor="select-day">Day of Week</label>
             <select id="select-day" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)}>

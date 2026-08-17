@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { apiRequest } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 const BookAppointment = () => {
+  const { user } = useAuth();
   const { doctorId } = useParams();
   const navigate = useNavigate();
   const [doctor, setDoctor] = useState(null);
@@ -101,11 +103,66 @@ const BookAppointment = () => {
       });
 
       if (data.success) {
-        setSuccessMsg('Your appointment request was submitted successfully!');
-        // Redirect to appointments list after 2 seconds
-        setTimeout(() => {
-          navigate('/patient/appointments');
-        }, 2000);
+        if (data.razorpayOrder) {
+          // Open Razorpay Checkout modal
+          const options = {
+            key: data.razorpayOrder.key,
+            amount: data.razorpayOrder.amount,
+            currency: data.razorpayOrder.currency,
+            name: "MediConnect",
+            description: `Consultation with Dr. ${doctor.user.name}`,
+            order_id: data.razorpayOrder.id,
+            handler: async function (response) {
+              setBookingLoading(true);
+              try {
+                const verifyData = await apiRequest(`/appointments/${data.appointment._id}/verify-payment`, {
+                  method: 'POST',
+                  body: {
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_signature: response.razorpay_signature
+                  }
+                });
+                if (verifyData.success) {
+                  setSuccessMsg('Your appointment request was booked and paid successfully!');
+                  setTimeout(() => {
+                    navigate('/patient/appointments');
+                  }, 2000);
+                } else {
+                  setError(verifyData.message || 'Payment verification failed. Please contact support.');
+                }
+              } catch (err) {
+                setError(err.message || 'Payment verification failed. Please contact support.');
+              } finally {
+                setBookingLoading(false);
+              }
+            },
+            prefill: {
+              name: user?.name || '',
+              email: user?.email || '',
+              contact: user?.phone || ''
+            },
+            theme: {
+              color: "#0f766e"
+            },
+            modal: {
+              ondismiss: function () {
+                setSuccessMsg('Booking initiated. Please complete the pending payment in your appointments list.');
+                setTimeout(() => {
+                  navigate('/patient/appointments');
+                }, 2500);
+              }
+            }
+          };
+
+          const rzp = new window.Razorpay(options);
+          rzp.open();
+        } else {
+          setSuccessMsg('Your appointment request was submitted successfully!');
+          setTimeout(() => {
+            navigate('/patient/appointments');
+          }, 2000);
+        }
       }
     } catch (err) {
       setError(err.message || 'Failed to book appointment');
@@ -138,7 +195,7 @@ const BookAppointment = () => {
             <br />
             <strong>Experience:</strong> {doctor.experience} Years
             <br />
-            <strong>Consultation Fee:</strong> ${doctor.consultationFee}
+            <strong>Consultation Fee:</strong> ₹{doctor.consultationFee}
           </p>
           {doctor.bio && (
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginTop: '0.75rem', padding: '0.5rem', backgroundColor: 'var(--bg-muted)', borderRadius: '4px' }}>

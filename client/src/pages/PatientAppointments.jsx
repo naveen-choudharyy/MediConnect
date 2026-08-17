@@ -2,14 +2,67 @@ import React, { useState, useEffect } from 'react';
 import { apiRequest } from '../utils/api';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../components/StatusBadge';
+import { useAuth } from '../context/AuthContext';
 
 const PatientAppointments = () => {
+  const { user } = useAuth();
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeNotesId, setActiveNotesId] = useState(null);
   const [notesContent, setNotesContent] = useState('');
   const [notesLoading, setNotesLoading] = useState(false);
+
+  const handlePayNow = async (appId) => {
+    try {
+      const data = await apiRequest(`/appointments/${appId}/payment-payload`);
+      if (data.success && data.razorpayOrder) {
+        const options = {
+          key: data.razorpayOrder.key,
+          amount: data.razorpayOrder.amount,
+          currency: data.razorpayOrder.currency,
+          name: "MediConnect",
+          description: `Consultation with Dr. ${data.doctorName}`,
+          order_id: data.razorpayOrder.id,
+          handler: async function (response) {
+            try {
+              const verifyData = await apiRequest(`/appointments/${appId}/verify-payment`, {
+                method: 'POST',
+                body: {
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature
+                }
+              });
+              if (verifyData.success) {
+                alert('Payment verified and booking completed successfully!');
+                fetchAppointments();
+              } else {
+                alert(verifyData.message || 'Payment verification failed.');
+              }
+            } catch (err) {
+              alert(err.message || 'Payment verification failed.');
+            }
+          },
+          prefill: {
+            name: user?.name || '',
+            email: user?.email || '',
+            contact: user?.phone || ''
+          },
+          theme: {
+            color: "#0f766e"
+          }
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.open();
+      } else {
+        alert(data.message || 'Failed to fetch payment details.');
+      }
+    } catch (err) {
+      alert(err.message || 'Failed to load payment gateway.');
+    }
+  };
 
   const fetchAppointments = async () => {
     try {
@@ -90,7 +143,12 @@ const PatientAppointments = () => {
                       Specialization: {app.doctor.specialization}
                     </span>
                   </div>
-                  <StatusBadge status={app.status} />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+                    <StatusBadge status={app.status} />
+                    <span className={`badge badge-${app.paymentStatus === 'paid' ? 'completed' : app.paymentStatus === 'failed' ? 'rejected' : 'pending'}`}>
+                      Payment: {app.paymentStatus || 'pending'}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid-3" style={{ gap: '1rem', fontSize: '0.95rem' }}>
@@ -101,11 +159,16 @@ const PatientAppointments = () => {
                     <strong>Time:</strong> {app.startTime} - {app.endTime}
                   </div>
                   <div>
-                    <strong>Consultation Fee:</strong> ${app.doctor.consultationFee}
+                    <strong>Consultation Fee:</strong> ₹{app.doctor.consultationFee}
                   </div>
                 </div>
 
                 <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  {app.paymentStatus === 'pending' && app.status === 'pending' && (
+                    <button onClick={() => handlePayNow(app._id)} className="btn btn-primary" style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
+                      💳 Pay Now (INR)
+                    </button>
+                  )}
                   {isJoinable && (
                     <Link to={`/appointments/${app._id}/consultation`} className="btn btn-primary">
                       Join Video Consultation

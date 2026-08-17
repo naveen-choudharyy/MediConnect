@@ -75,7 +75,7 @@ const DoctorSearch = () => {
           </div>
 
           <div>
-            <label htmlFor="maxFee">Max Fee ($)</label>
+            <label htmlFor="maxFee">Max Fee (INR)</label>
             <input
               type="number"
               id="maxFee"
@@ -114,7 +114,7 @@ const DoctorSearch = () => {
                     <strong>Experience:</strong> {doc.experience} Years
                   </div>
                   <div>
-                    <strong>Consultation Fee:</strong> ${doc.consultationFee}
+                    <strong>Consultation Fee:</strong> ₹{doc.consultationFee}
                   </div>
                 </div>
                 {doc.bio && (

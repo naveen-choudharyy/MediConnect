@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -6,6 +6,12 @@ const Navbar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Close navigation drawer when location changes
+  useEffect(() => {
+    setIsOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -20,7 +26,14 @@ const Navbar = () => {
         <Link to="/" className="navbar-brand">
           ✚ MediConnect
         </Link>
-        <div className="navbar-links">
+        <button 
+          className="navbar-toggle" 
+          onClick={() => setIsOpen(!isOpen)}
+          aria-label="Toggle navigation menu"
+        >
+          {isOpen ? '✕' : '☰'}
+        </button>
+        <div className={`navbar-links ${isOpen ? 'open' : ''}`}>
           <Link to="/" className={`navbar-item ${isActive('/')}`}>
             Home
           </Link>
