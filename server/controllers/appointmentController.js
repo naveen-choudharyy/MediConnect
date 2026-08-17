@@ -4,6 +4,13 @@ const User = require('../models/User');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
+const getRazorpayErrorMessage = (error) => {
+  if (error && error.error && error.error.description) {
+    return error.error.description;
+  }
+  return error.message || 'Unknown payment gateway error';
+};
+
 // Helper to normalize Date to YYYY-MM-DD at midnight UTC
 const normalizeDate = (dateString) => {
   const d = new Date(dateString);
@@ -134,7 +141,7 @@ exports.bookAppointment = async (req, res) => {
         console.error('Razorpay Order Creation Failed:', error);
         return res.status(500).json({
           success: false,
-          message: 'Failed to initiate payment gateway order: ' + error.message
+          message: 'Failed to initiate payment gateway order: ' + getRazorpayErrorMessage(error)
         });
       }
     } else {
@@ -451,6 +458,7 @@ exports.getPaymentPayload = async (req, res) => {
       doctorName: appointment.doctor.name
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error('Razorpay Order Creation Failed:', error);
+    return res.status(500).json({ success: false, message: getRazorpayErrorMessage(error) });
   }
 };
