@@ -14,10 +14,15 @@ connectDB();
 // Create HTTP Server
 const server = http.createServer(app);
 
+let clientUrl = process.env.CLIENT_URL || '*';
+if (clientUrl !== '*' && clientUrl.endsWith('/')) {
+  clientUrl = clientUrl.slice(0, -1);
+}
+
 // Initialize Socket.IO Server
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || '*',
+    origin: clientUrl,
     methods: ['GET', 'POST']
   }
 });

@@ -8,8 +8,13 @@ const consultationRoutes = require('./routes/consultationRoutes');
 const app = express();
 
 // Configure CORS
+let clientUrl = process.env.CLIENT_URL || '*';
+if (clientUrl !== '*' && clientUrl.endsWith('/')) {
+  clientUrl = clientUrl.slice(0, -1);
+}
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || '*',
+  origin: clientUrl,
   credentials: true
 }));
 
