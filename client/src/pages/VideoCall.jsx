@@ -25,6 +25,8 @@ const VideoCall = () => {
   // Media states
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
   
   // Clinical Notes (Doctor only)
   const [clinicalNotes, setClinicalNotes] = useState('');
@@ -34,6 +36,7 @@ const VideoCall = () => {
   const socketRef = useRef(null);
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
+  const pendingCandidatesRef = useRef([]);
   
   // HTML Video Elements refs
   const localVideoRef = useRef(null);
@@ -61,9 +64,77 @@ const VideoCall = () => {
     initCallData();
   }, [appointmentId]);
 
+  // Bind local stream to video ref
+  useEffect(() => {
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  // Bind remote stream to video ref when peer is connected
+  useEffect(() => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, peerConnected]);
+
   // 2. Setup WebRTC Media, PeerConnection, and WebSockets Signaling
   useEffect(() => {
     if (!appointment || !userRole) return;
+
+    // Helper to add pending candidates to peer connection
+    const addPendingCandidates = async (pcInstance) => {
+      const pc = pcInstance || pcRef.current;
+      if (!pc || !pc.remoteDescription) return;
+      const candidates = pendingCandidatesRef.current;
+      pendingCandidatesRef.current = [];
+      for (const candidate of candidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log('Added pending ICE candidate successfully');
+        } catch (err) {
+          console.error('Error adding pending ICE candidate:', err.message);
+        }
+      }
+    };
+
+    // Factory helper to create a clean RTCPeerConnection instance
+    const createPeerConnection = () => {
+      if (pcRef.current) {
+        pcRef.current.close();
+      }
+
+      const pc = new RTCPeerConnection(pcConfig);
+      pcRef.current = pc;
+
+      // Add local tracks to PeerConnection
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current);
+        });
+      }
+
+      // ICE Candidate handling
+      pc.onicecandidate = (event) => {
+        if (event.candidate && socketRef.current) {
+          socketRef.current.emit('ice-candidate', {
+            candidate: event.candidate,
+            appointmentId
+          });
+        }
+      };
+
+      // Remote track arrival
+      pc.ontrack = (event) => {
+        console.log('Received remote media stream track');
+        const stream = event.streams[0] || new MediaStream([event.track]);
+        setRemoteStream(stream);
+        setPeerConnected(true);
+        setConnectionStatus('Connected');
+      };
+
+      return pc;
+    };
 
     const startMediaAndConnect = async () => {
       try {
@@ -75,64 +146,41 @@ const VideoCall = () => {
         });
         
         localStreamRef.current = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
+        setLocalStream(stream);
 
         // Initialize Socket.IO connection
         setConnectionStatus('Connecting to signaling server...');
         const token = getAuthToken();
-        const socketUrl = import.meta.env.VITE_SOCKET_URL || `${window.location.protocol}//${window.location.hostname}:5000`;
+        
+        let derivedSocketUrl = '';
+        if (import.meta.env.VITE_API_URL) {
+          try {
+            const url = new URL(import.meta.env.VITE_API_URL);
+            derivedSocketUrl = url.origin;
+          } catch (e) {
+            console.error('Invalid VITE_API_URL:', e);
+          }
+        }
+        const socketUrl = import.meta.env.VITE_SOCKET_URL || derivedSocketUrl || `${window.location.protocol}//${window.location.hostname}:5000`;
         
         socketRef.current = io(socketUrl, {
           auth: { token }
         });
 
-        // Initialize RTCPeerConnection
-        pcRef.current = new RTCPeerConnection(pcConfig);
+        // Initialize RTCPeerConnection placeholder
+        createPeerConnection();
 
-        // Add local tracks to PeerConnection
-        stream.getTracks().forEach((track) => {
-          pcRef.current.addTrack(track, stream);
-        });
-
-        // ICE Candidate handling
-        pcRef.current.onicecandidate = (event) => {
-          if (event.candidate && socketRef.current) {
-            socketRef.current.emit('ice-candidate', {
-              candidate: event.candidate,
-              appointmentId
-            });
-          }
-        };
-
-        // Remote track arrival
-        pcRef.current.ontrack = (event) => {
-          console.log('Received remote media stream track');
-          if (event.streams && event.streams[0] && remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-            setPeerConnected(true);
-            setConnectionStatus('Connected');
-          }
-        };
-
-        // Notify backend that consultation has started
-        await apiRequest(`/consultations/${appointmentId}/start`, { method: 'POST' });
-
-        // Join the WebSocket signaling room
-        socketRef.current.emit('join-room', { appointmentId });
-        setConnectionStatus('Waiting for other participant to join...');
-
-        // SOCKET EVENT LISTENERS
+        // SOCKET EVENT LISTENERS - bind before emitting join-room
         
         // Another user joins the room -> we initiate the offer
         socketRef.current.on('user-joined', async (peerInfo) => {
           console.log(`Peer joined: ${peerInfo.name} (${peerInfo.role})`);
           setConnectionStatus(`Connecting with ${peerInfo.role}...`);
           
+          const pc = createPeerConnection();
           try {
-            const offer = await pcRef.current.createOffer();
-            await pcRef.current.setLocalDescription(offer);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
             
             socketRef.current.emit('offer', {
               offer,
@@ -146,10 +194,13 @@ const VideoCall = () => {
         // Receive offer from the caller -> answer it
         socketRef.current.on('offer', async ({ offer, senderId }) => {
           console.log('Received SDP Offer');
+          const pc = createPeerConnection();
           try {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await pcRef.current.createAnswer();
-            await pcRef.current.setLocalDescription(answer);
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            await addPendingCandidates(pc);
+            
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
             
             socketRef.current.emit('answer', {
               answer,
@@ -164,7 +215,10 @@ const VideoCall = () => {
         socketRef.current.on('answer', async ({ answer, senderId }) => {
           console.log('Received SDP Answer');
           try {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+            if (pcRef.current) {
+              await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+              await addPendingCandidates(pcRef.current);
+            }
           } catch (err) {
             console.error('Error completing SDP connection:', err.message);
           }
@@ -174,7 +228,11 @@ const VideoCall = () => {
         socketRef.current.on('ice-candidate', async ({ candidate, senderId }) => {
           try {
             if (pcRef.current) {
-              await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+              if (pcRef.current.remoteDescription && pcRef.current.remoteDescription.type) {
+                await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+              } else {
+                pendingCandidatesRef.current.push(candidate);
+              }
             }
           } catch (err) {
             console.error('Error adding ICE candidate:', err.message);
@@ -185,9 +243,7 @@ const VideoCall = () => {
         socketRef.current.on('user-left', () => {
           console.log('Other participant disconnected from room');
           setPeerConnected(false);
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = null;
-          }
+          setRemoteStream(null);
           setConnectionStatus('Participant has left the consultation');
         });
 
@@ -202,6 +258,13 @@ const VideoCall = () => {
         socketRef.current.on('error-msg', (msg) => {
           setError(msg);
         });
+
+        // Notify backend that consultation has started
+        await apiRequest(`/consultations/${appointmentId}/start`, { method: 'POST' });
+
+        // Join the WebSocket signaling room
+        socketRef.current.emit('join-room', { appointmentId });
+        setConnectionStatus('Waiting for other participant to join...');
 
       } catch (err) {
         console.error('Media or signaling setup error:', err);
@@ -222,6 +285,7 @@ const VideoCall = () => {
     // Stop local camera/mic tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
     }
 
     // Close PeerConnection
@@ -238,6 +302,9 @@ const VideoCall = () => {
     }
 
     setPeerConnected(false);
+    setRemoteStream(null);
+    setLocalStream(null);
+    pendingCandidatesRef.current = [];
   };
 
   // Toggle Microphone
