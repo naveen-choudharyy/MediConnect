@@ -14,7 +14,7 @@ connectDB();
 // Create HTTP Server
 const server = http.createServer(app);
 
-let clientUrl = process.env.CLIENT_URL || '*';
+let clientUrl = (process.env.CLIENT_URL || '*').trim();
 if (clientUrl !== '*' && clientUrl.endsWith('/')) {
   clientUrl = clientUrl.slice(0, -1);
 }
